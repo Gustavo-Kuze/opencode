@@ -8,6 +8,7 @@ import { Vcs } from "@/project/vcs"
 import { Skill } from "@/skill"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { InstanceHttpApi } from "../api"
 import { markInstanceForDisposal } from "../lifecycle"
 
@@ -75,5 +76,51 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       .handle("skill", getSkill)
       .handle("lsp", getLsp)
       .handle("formatter", getFormatter)
+  }),
+)
+
+export const transcribeRoute = HttpRouter.use((router) =>
+  Effect.gen(function* () {
+    yield* router.add(
+      "POST",
+      "/transcribe",
+      Effect.gen(function* () {
+        const req = yield* HttpServerRequest.HttpServerRequest
+        const source = req.source instanceof Request ? req.source : undefined
+        if (!source) {
+          return HttpServerResponse.json({ error: "Invalid request" }, { status: 400 })
+        }
+        const formData = yield* Effect.promise(() => source.formData())
+        const audio = formData.get("audio")
+        if (!(audio instanceof File)) {
+          return HttpServerResponse.json({ error: "Missing audio file" }, { status: 400 })
+        }
+
+        const apiKey = process.env.GROQ_API_KEY
+        if (!apiKey) {
+          return HttpServerResponse.json({ error: "GROQ_API_KEY not configured" }, { status: 400 })
+        }
+
+        const groqForm = new FormData()
+        groqForm.append("file", audio)
+        groqForm.append("model", "whisper-large-v3-turbo")
+
+        const res = yield* Effect.promise(() =>
+          fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${apiKey}` },
+            body: groqForm,
+          }),
+        )
+
+        if (!res.ok) {
+          const text = yield* Effect.promise(() => res.text().catch(() => "Unknown error"))
+          return HttpServerResponse.json({ error: `Groq API error: ${text}` }, { status: 502 })
+        }
+
+        const data = (yield* Effect.promise(() => res.json())) as { text?: string }
+        return HttpServerResponse.json({ text: data.text ?? "" })
+      }),
+    )
   }),
 )

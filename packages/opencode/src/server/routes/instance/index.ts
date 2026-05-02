@@ -275,4 +275,60 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
           return yield* svc.status()
         }),
     )
+    .post(
+      "/transcribe",
+      describeRoute({
+        summary: "Transcribe audio",
+        description: "Transcribe an audio file using Groq Whisper API.",
+        operationId: "transcribe",
+        responses: {
+          200: {
+            description: "Transcription result",
+            content: {
+              "application/json": {
+                schema: resolver(z.object({ text: z.string() })),
+              },
+            },
+          },
+          400: {
+            description: "Missing audio file or API key",
+          },
+          502: {
+            description: "Groq API error",
+          },
+        },
+      }),
+      async (c) => {
+        const body = await c.req.parseBody()
+        const audio = body.audio
+        if (!(audio instanceof File)) {
+          return c.json({ error: "Missing audio file" }, 400)
+        }
+
+        const apiKey = process.env.GROQ_API_KEY
+        if (!apiKey) {
+          return c.json({ error: "GROQ_API_KEY not configured" }, 400)
+        }
+
+        const formData = new FormData()
+        formData.append("file", audio)
+        formData.append("model", "whisper-large-v3-turbo")
+
+        const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: formData,
+        })
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "Unknown error")
+          return c.json({ error: `Groq API error: ${text}` }, 502)
+        }
+
+        const data = (await res.json()) as { text?: string }
+        return c.json({ text: data.text ?? "" })
+      },
+    )
 }

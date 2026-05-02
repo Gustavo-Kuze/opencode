@@ -170,6 +170,8 @@ import type {
   ToolIdsResponses,
   ToolListErrors,
   ToolListResponses,
+  TranscribeErrors,
+  TranscribeResponses,
   TuiAppendPromptErrors,
   TuiAppendPromptResponses,
   TuiClearPromptResponses,
@@ -4363,6 +4365,36 @@ export class OpencodeClient extends HeyApiClient {
   constructor(args?: { client?: Client; key?: string }) {
     super(args)
     OpencodeClient.__registry.set(this, args?.key)
+  }
+
+  /**
+   * Transcribe audio
+   *
+   * Transcribe an audio file using Groq Whisper API.
+   */
+  public transcribe<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<TranscribeResponses, TranscribeErrors, ThrowOnError>({
+      url: "/transcribe",
+      ...options,
+      ...params,
+    })
   }
 
   private _global?: Global

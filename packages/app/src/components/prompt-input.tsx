@@ -23,6 +23,7 @@ import { DockShellForm, DockTray } from "@opencode-ai/ui/dock-surface"
 import { Icon } from "@opencode-ai/ui/icon"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
+import { showToast } from "@opencode-ai/ui/toast"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Select } from "@opencode-ai/ui/select"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
@@ -257,6 +258,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     draggingType: "image" | "@mention" | null
     mode: "normal" | "shell"
     applyingHistory: boolean
+    recording: boolean
+    transcribing: boolean
   }>({
     popover: null,
     historyIndex: -1,
@@ -265,6 +268,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     draggingType: null,
     mode: "normal",
     applyingHistory: false,
+    recording: false,
+    transcribing: false,
   })
 
   const buttonsSpring = useSpring(() => (store.mode === "normal" ? 1 : 0), { visualDuration: 0.2, bounce: 0 })
@@ -1090,6 +1095,61 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onSubmit: props.onSubmit,
   })
 
+  let mediaRecorder: MediaRecorder | undefined
+  let audioChunks: Blob[] = []
+
+  const startRecording = async () => {
+    if (store.recording || store.transcribing) return
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" })
+    audioChunks = []
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data)
+    }
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop())
+      const blob = new Blob(audioChunks, { type: "audio/webm" })
+      const file = new File([blob], "recording.webm", { type: "audio/webm" })
+      void transcribeAudio(file)
+    }
+    mediaRecorder.start()
+    setStore("recording", true)
+  }
+
+  const stopRecording = () => {
+    if (!mediaRecorder || mediaRecorder.state === "inactive") return
+    mediaRecorder.stop()
+    setStore("recording", false)
+  }
+
+  const transcribeAudio = async (file: File) => {
+    setStore("transcribing", true)
+    try {
+      const formData = new FormData()
+      formData.append("audio", file)
+      const res = await fetch(`${sdk.url}/transcribe`, {
+        method: "POST",
+        body: formData,
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => "Unknown error")
+        throw new Error(text)
+      }
+      const data = (await res.json()) as { text?: string }
+      const text = data.text ?? ""
+      if (text) {
+        setEditorText(text)
+        prompt.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
+        focusEditorEnd()
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      showToast({ title: language.t("prompt.toast.transcriptionFailed.title"), description: message })
+    } finally {
+      setStore("transcribing", false)
+    }
+  }
+
   const handleKeyDown = (event: KeyboardEvent) => {
     if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "u") {
       event.preventDefault()
@@ -1417,7 +1477,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           <div class="pointer-events-none absolute bottom-2 left-2">
             <div
               aria-hidden={store.mode !== "normal"}
-              class="pointer-events-auto"
+              class="pointer-events-auto flex items-center gap-1"
               style={{
                 "pointer-events": buttonsSpring() > 0.5 ? "auto" : "none",
               }}
@@ -1441,6 +1501,34 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   <Icon name="plus" class="size-4.5" />
                 </Button>
               </TooltipKeybind>
+              <Tooltip
+                placement="top"
+                value={store.recording ? language.t("prompt.action.stopRecording") : language.t("prompt.action.recordAudio")}
+              >
+                <Button
+                  data-action="prompt-record"
+                  type="button"
+                  variant={store.recording ? "primary" : "ghost"}
+                  class="size-8 p-0"
+                  style={buttons()}
+                  onClick={() => {
+                    if (store.recording) {
+                      stopRecording()
+                      return
+                    }
+                    void startRecording()
+                  }}
+                  disabled={store.mode !== "normal" || store.transcribing}
+                  tabIndex={store.mode === "normal" ? undefined : -1}
+                  aria-label={store.recording ? language.t("prompt.action.stopRecording") : language.t("prompt.action.recordAudio")}
+                >
+                  <Show when={store.transcribing} fallback={<Icon name="microphone" class="size-4.5" />}>
+                    <div class="animate-spin">
+                      <Icon name="microphone" class="size-4.5" />
+                    </div>
+                  </Show>
+                </Button>
+              </Tooltip>
             </div>
           </div>
         </div>

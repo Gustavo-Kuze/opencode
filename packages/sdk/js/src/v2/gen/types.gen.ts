@@ -5544,3 +5544,35 @@ export type FormatterStatusResponses = {
 }
 
 export type FormatterStatusResponse = FormatterStatusResponses[keyof FormatterStatusResponses]
+
+export type TranscribeData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/transcribe"
+}
+
+export type TranscribeErrors = {
+  /**
+   * Missing audio file or API key
+   */
+  400: unknown
+  /**
+   * Groq API error
+   */
+  502: unknown
+}
+
+export type TranscribeResponses = {
+  /**
+   * Transcription result
+   */
+  200: {
+    text: string
+  }
+}
+
+export type TranscribeResponse = TranscribeResponses[keyof TranscribeResponses]
