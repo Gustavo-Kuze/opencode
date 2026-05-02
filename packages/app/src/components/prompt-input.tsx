@@ -1101,15 +1101,29 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const startRecording = async () => {
     if (store.recording || store.transcribing) return
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" })
+    const options: MediaRecorderOptions = {}
+    if (MediaRecorder.isTypeSupported("audio/webm")) {
+      options.mimeType = "audio/webm"
+    } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+      options.mimeType = "audio/mp4"
+    }
+    mediaRecorder = new MediaRecorder(stream, options)
     audioChunks = []
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunks.push(e.data)
     }
+    mediaRecorder.onerror = (e) => {
+      stream.getTracks().forEach((t) => t.stop())
+      setStore("recording", false)
+      const message = e instanceof Error ? e.message : "Recording failed"
+      showToast({ title: language.t("prompt.toast.transcriptionFailed.title"), description: message })
+    }
     mediaRecorder.onstop = () => {
       stream.getTracks().forEach((t) => t.stop())
-      const blob = new Blob(audioChunks, { type: "audio/webm" })
-      const file = new File([blob], "recording.webm", { type: "audio/webm" })
+      const type = mediaRecorder?.mimeType || "audio/webm"
+      const ext = type.includes("mp4") ? "mp4" : "webm"
+      const blob = new Blob(audioChunks, { type })
+      const file = new File([blob], `recording.${ext}`, { type })
       void transcribeAudio(file)
     }
     mediaRecorder.start()
